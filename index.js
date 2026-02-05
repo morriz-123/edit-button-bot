@@ -27,7 +27,7 @@ const STAFF_ROLE_ID = "1468656996676010014";
 
 let EDIT_MESSAGE_ID = null;
 
-// ───────── HELPER: FIND STOCK MESSAGE ─────────
+// ───────── FIND STOCK MESSAGE ─────────
 async function findStockMessage(channel) {
   const messages = await channel.messages.fetch({ limit: 50 });
   return messages.find(
@@ -38,46 +38,13 @@ async function findStockMessage(channel) {
   );
 }
 
-// ───────── TICKET BUTTONS ─────────
-function ticketControls(state = "open") {
-  const row = new ActionRowBuilder();
-
-  if (state === "open") {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Close Ticket")
-        .setStyle(ButtonStyle.Danger)
-    );
-  }
-
-  if (state === "closed") {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId("open_ticket")
-        .setLabel("Open Ticket")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId("delete_ticket")
-        .setLabel("Delete Ticket")
-        .setStyle(ButtonStyle.Secondary)
-    );
-  }
-
-  return row;
-}
-
 // ───────── READY ─────────
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const commands = [
-    new SlashCommandBuilder()
-      .setName("send")
-      .setDescription("Send wood stock embed"),
-    new SlashCommandBuilder()
-      .setName("edit")
-      .setDescription("Edit the wood stock embed"),
+    new SlashCommandBuilder().setName("send").setDescription("Send stock"),
+    new SlashCommandBuilder().setName("edit").setDescription("Edit stock"),
   ];
 
   await client.application.commands.set(commands);
@@ -86,59 +53,37 @@ client.once(Events.ClientReady, async () => {
 // ───────── INTERACTIONS ─────────
 client.on(Events.InteractionCreate, async (interaction) => {
 
-  // ───── ROLE + CHANNEL CHECK ─────
+  // ───── PERMS FOR /send & /edit ─────
   if (interaction.isChatInputCommand()) {
     if (["send", "edit"].includes(interaction.commandName)) {
       if (interaction.channelId !== COMMAND_CHANNEL_ID) {
-        return interaction.reply({
-          content: "❌ Use this command in the stock channel only.",
-          ephemeral: true,
-        });
+        return interaction.reply({ content: "Wrong channel.", ephemeral: true });
       }
-
       if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
-        return interaction.reply({
-          content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
-        });
+        return interaction.reply({ content: "No permission.", ephemeral: true });
       }
     }
   }
 
   // ───────── /send ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "send") {
-
     const existing = await findStockMessage(interaction.channel);
     if (existing) {
       EDIT_MESSAGE_ID = existing.id;
       return interaction.reply({
-        content: "❌ Stock message already exists. Use /edit.",
+        content: "Stock already exists. Use /edit.",
         ephemeral: true,
       });
     }
 
-    const stockDescription = `**Wood Service Stock**
-<:oak:1467561136567357587> *Oak Log* - **"0"** In Stock
-<:birch:1467561466751221802> *Birch Log* - **"0"** In Stock
-<:spruce:1467562150309531689> *Spruce Log* - **"0"** In Stock
-<:darkoak:1467561982067478731> *Dark Oak Log* - **"0"** In Stock
-<:jungle:1467962619267645602> *Jungle Log* - **"0"** In Stock
-<:mangroove:1467564959960662127> *Mangroove Log* - **""** In Stock
-<:acacia:1467561668346122455> *Acacia Log* - **"0"** In Stock
-<:cherry:1467562085494952066> *Cherry Log* - **"0"** In Stock
-<:baddoo:1467962582752170231> *Bamboo Log* - **"0"** In Stock
-<:pale:1468342960692138047> *Pale Oak Log* - **"0"** In Stock
-<a:warped:1467565047193538622> *Warped Log* - **"0"** In Stock
-<a:crimson:1467565347166097558> *Crimson Log* - **"0"** In Stock`;
-
     const embed1 = new EmbedBuilder()
-      .setTitle("Wood Stock <:oak:1467561136567357587>")
-      .setDescription(stockDescription)
+      .setTitle("Wood Stock")
+      .setDescription("Edit me with /edit")
       .setColor("#d3bf7e");
 
     const embed2 = new EmbedBuilder()
-      .setTitle("Prices :money_with_wings:")
-      .setDescription("**Wood Stock Prices**\nPrices will be added soon!")
+      .setTitle("Prices")
+      .setDescription("Edit me with /edit")
       .setColor("#d3bf7e");
 
     const row = new ActionRowBuilder().addComponents(
@@ -155,76 +100,127 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     EDIT_MESSAGE_ID = msg.id;
 
-    await interaction.reply({
-      content: "✅ Stock embed sent",
+    return interaction.reply({ content: "Sent.", ephemeral: true });
+  }
+
+  // ───────── BUY HERE BUTTON (THIS WAS MISSING) ─────────
+  if (interaction.isButton() && interaction.customId === "buy_here") {
+    const modal = new ModalBuilder()
+      .setCustomId("buy_modal")
+      .setTitle("Wood Order");
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("wood")
+          .setLabel("What type of wood?")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Amount?")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("username")
+          .setLabel("In-game username")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+
+    return interaction.showModal(modal);
+  }
+
+  // ───────── BUY MODAL SUBMIT → CREATE TICKET ─────────
+  if (interaction.isModalSubmit() && interaction.customId === "buy_modal") {
+    const wood = interaction.fields.getTextInputValue("wood");
+    const amount = interaction.fields.getTextInputValue("amount");
+    const username = interaction.fields.getTextInputValue("username");
+
+    const channel = await interaction.guild.channels.create({
+      name: `order-${wood}-${amount}`.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+      type: ChannelType.GuildText,
+      parent: TICKET_CATEGORY_ID,
+      permissionOverwrites: [
+        { id: interaction.guild.id, deny: ["ViewChannel"] },
+        { id: interaction.user.id, allow: ["ViewChannel", "SendMessages"] },
+        { id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages"] },
+      ],
+    });
+
+    await channel.send({
+      content: `<@&${STAFF_ROLE_ID}>`,
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🪵 New Order")
+          .setColor("#d3bf7e")
+          .addFields(
+            { name: "Discord User", value: interaction.user.toString() },
+            { name: "Username", value: username },
+            { name: "Wood", value: wood, inline: true },
+            { name: "Amount", value: amount, inline: true }
+          ),
+      ],
+    });
+
+    return interaction.reply({
+      content: `Order created: <#${channel.id}>`,
       ephemeral: true,
     });
   }
 
-  // ───────── /edit ─────────
+  // ───────── /edit (unchanged) ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
-
     let msg = null;
-
     if (EDIT_MESSAGE_ID) {
       msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID).catch(() => null);
     }
-
+    if (!msg) msg = await findStockMessage(interaction.channel);
     if (!msg) {
-      msg = await findStockMessage(interaction.channel);
-    }
-
-    if (!msg) {
-      return interaction.reply({
-        content: "❌ No stock message found. Use /send first.",
-        ephemeral: true,
-      });
+      return interaction.reply({ content: "No stock found.", ephemeral: true });
     }
 
     EDIT_MESSAGE_ID = msg.id;
 
     const modal = new ModalBuilder()
       .setCustomId("edit_modal")
-      .setTitle("Edit Stock Embeds");
+      .setTitle("Edit Stock");
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("stock_desc")
-          .setLabel("Stock Embed Description")
+          .setCustomId("stock")
+          .setLabel("Stock")
           .setStyle(TextInputStyle.Paragraph)
           .setValue(msg.embeds[0]?.description || "")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId("price_desc")
-          .setLabel("Prices Embed Description")
+          .setCustomId("prices")
+          .setLabel("Prices")
           .setStyle(TextInputStyle.Paragraph)
           .setValue(msg.embeds[1]?.description || "")
       )
     );
 
-    await interaction.showModal(modal);
+    return interaction.showModal(modal);
   }
 
-  // ───────── EDIT SUBMIT ─────────
   if (interaction.isModalSubmit() && interaction.customId === "edit_modal") {
     const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
-
     const e1 = EmbedBuilder.from(msg.embeds[0]).setDescription(
-      interaction.fields.getTextInputValue("stock_desc")
+      interaction.fields.getTextInputValue("stock")
     );
-
     const e2 = EmbedBuilder.from(msg.embeds[1]).setDescription(
-      interaction.fields.getTextInputValue("price_desc")
+      interaction.fields.getTextInputValue("prices")
     );
-
     await msg.edit({ embeds: [e1, e2] });
-
-    await interaction.reply({
-      content: "✅ Embeds updated",
-      ephemeral: true,
-    });
+    return interaction.reply({ content: "Updated.", ephemeral: true });
   }
 });
 
