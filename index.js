@@ -20,6 +20,8 @@ const client = new Client({
 });
 
 // CONFIG
+const ADMIN_ROLE_ID = "1468655631979253892"; // ✅ ADDED
+const COMMAND_CHANNEL_ID = "1467957330816667814"; // ✅ ADDED
 const TICKET_CATEGORY_ID = "1468656976761327698";
 const CLOSED_CATEGORY_ID = "1469050238432972901";
 const STAFF_ROLE_ID = "1468656996676010014";
@@ -66,8 +68,7 @@ client.once(Events.ClientReady, async () => {
 
     new SlashCommandBuilder()
       .setName("edit")
-      .setDescription("Edit the wood stock embed")
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+      .setDescription("Edit the wood stock embed"),
   ];
 
   await client.application.commands.set(commands);
@@ -75,6 +76,27 @@ client.once(Events.ClientReady, async () => {
 
 // ───────── INTERACTIONS ─────────
 client.on(Events.InteractionCreate, async (interaction) => {
+
+  // ───── PERM + CHANNEL CHECK (ONLY FOR /send & /edit) ─────
+  if (interaction.isChatInputCommand()) {
+    if (["send", "edit"].includes(interaction.commandName)) {
+
+      if (interaction.channelId !== COMMAND_CHANNEL_ID) {
+        return interaction.reply({
+          content: "❌ Use this command in the stock channel only.",
+          ephemeral: true,
+        });
+      }
+
+      if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
+        return interaction.reply({
+          content: "❌ You do not have permission to use this command.",
+          ephemeral: true,
+        });
+      }
+    }
+  }
+
   // /send
   if (interaction.isChatInputCommand() && interaction.commandName === "send") {
     const stockDescription = `**Wood Service Stock**
@@ -89,14 +111,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 <:baddoo:1467962582752170231> *Bamboo Log* - **"0"** In Stock
 <:pale:1468342960692138047> *Pale Oak Log* - **"0"** In Stock
 <a:warped:1467565047193538622> *Warped Log* - **"0"** In Stock
-<a:crimson:1467565347166097558> *Crimson Log* - **"0"** In Stock
-
-**Most Expensive:** None
-**Most Popular:** None
-**Most In Stock:** None
-
-Want pings when we **restock**?
-https://discord.com/channels/1467957243017302189/1467958086479118590`;
+<a:crimson:1467565347166097558> *Crimson Log* - **"0"** In Stock`;
 
     const embed1 = new EmbedBuilder()
       .setTitle("Wood Stock <:oak:1467561136567357587>")
@@ -168,109 +183,20 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
     await interaction.showModal(modal);
   }
 
-  // BUY MODAL → CREATE TICKET
-  if (interaction.isModalSubmit() && interaction.customId === "buy_modal") {
-    const wood = interaction.fields.getTextInputValue("wood");
-    const amount = interaction.fields.getTextInputValue("amount");
-    const username = interaction.fields.getTextInputValue("username");
-
-    const channel = await interaction.guild.channels.create({
-      name: `order-${wood}-${amount}`.toLowerCase().replace(/[^a-z0-9-]/g, ""),
-      type: ChannelType.GuildText,
-      parent: TICKET_CATEGORY_ID,
-      permissionOverwrites: [
-        { id: interaction.guild.id, deny: ["ViewChannel"] },
-        {
-          id: interaction.user.id,
-          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
-        },
-        {
-          id: STAFF_ROLE_ID,
-          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
-        },
-        {
-          id: client.user.id,
-          allow: ["ViewChannel", "SendMessages", "ManageChannels"],
-        },
-      ],
-    });
-
-    await channel.setTopic(`owner:${interaction.user.id}`);
-
-    await channel.send({
-      content: `<@&${STAFF_ROLE_ID}>`,
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🪵 New Wood Order")
-          .setColor("#d3bf7e")
-          .addFields(
-            { name: "Discord User", value: interaction.user.toString() },
-            { name: "Username", value: username },
-            { name: "Wood Type", value: wood, inline: true },
-            { name: "Amount", value: amount, inline: true }
-          ),
-      ],
-      components: [ticketControls("open")],
-    });
-
-    await interaction.reply({
-      content: `✅ Order created!\n👉 **[Go to ticket](https://discord.com/channels/${interaction.guild.id}/${channel.id})**`,
-      ephemeral: true,
-    });
-  }
-
-  // CLOSE
-  if (interaction.isButton() && interaction.customId === "close_ticket") {
-    const owner = interaction.channel.topic?.split("owner:")[1];
-    if (owner)
-      await interaction.channel.permissionOverwrites.edit(owner, {
-        ViewChannel: false,
-      });
-
-    await interaction.channel.setParent(CLOSED_CATEGORY_ID);
-    await interaction.channel.send({
-      content: "🔒 Ticket closed.",
-      components: [ticketControls("closed")],
-    });
-
-    await interaction.reply({ ephemeral: true, content: "Ticket closed." });
-  }
-
-  // OPEN
-  if (interaction.isButton() && interaction.customId === "open_ticket") {
-    const owner = interaction.channel.topic?.split("owner:")[1];
-    if (owner)
-      await interaction.channel.permissionOverwrites.edit(owner, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-      });
-
-    await interaction.channel.setParent(TICKET_CATEGORY_ID);
-    await interaction.channel.send({
-      content: "🔓 Ticket reopened.",
-      components: [ticketControls("open")],
-    });
-
-    await interaction.reply({ ephemeral: true, content: "Ticket reopened." });
-  }
-
-  // DELETE
-  if (interaction.isButton() && interaction.customId === "delete_ticket") {
-    await interaction.reply({
-      content: "🗑️ Deleting ticket...",
-      ephemeral: true,
-    });
-    setTimeout(() => interaction.channel.delete(), 2000);
-  }
-
-  // /edit
+  // /edit (THIS ALREADY STORES LAST EDIT — DO NOT CHANGE)
   if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
+    if (!EDIT_MESSAGE_ID) {
+      return interaction.reply({
+        content: "❌ No stock message found.",
+        ephemeral: true,
+      });
+    }
+
+    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
+
     const modal = new ModalBuilder()
       .setCustomId("edit_modal")
       .setTitle("Edit Stock Embeds");
-
-    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -303,7 +229,11 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
     );
 
     await msg.edit({ embeds: [e1, e2] });
-    await interaction.reply({ ephemeral: true, content: "✅ Embeds updated" });
+
+    await interaction.reply({
+      content: "✅ Embeds updated",
+      ephemeral: true,
+    });
   }
 });
 
