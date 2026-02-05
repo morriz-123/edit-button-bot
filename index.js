@@ -22,21 +22,58 @@ const client = new Client({
 const ADMIN_ROLE_ID = "1468655631979253892";
 const COMMAND_CHANNEL_ID = "1467957330816667814";
 const TICKET_CATEGORY_ID = "1468656976761327698";
+const CLOSED_CATEGORY_ID = "1469050238432972901";
 const STAFF_ROLE_ID = "1468656996676010014";
 
 let EDIT_MESSAGE_ID = null;
+
+// ───────── HELPER: FIND STOCK MESSAGE ─────────
+async function findStockMessage(channel) {
+  const messages = await channel.messages.fetch({ limit: 50 });
+  return messages.find(
+    (m) =>
+      m.author.id === channel.client.user.id &&
+      m.embeds.length === 2 &&
+      m.components.length > 0
+  );
+}
+
+// ───────── TICKET BUTTONS ─────────
+function ticketControls(state = "open") {
+  const row = new ActionRowBuilder();
+
+  if (state === "open") {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("Close Ticket")
+        .setStyle(ButtonStyle.Danger)
+    );
+  }
+
+  if (state === "closed") {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId("open_ticket")
+        .setLabel("Open Ticket")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("delete_ticket")
+        .setLabel("Delete Ticket")
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+
+  return row;
+}
 
 // ───────── READY ─────────
 client.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const commands = [
-    new SlashCommandBuilder()
-      .setName("send")
-      .setDescription("Send wood stock embed"),
-    new SlashCommandBuilder()
-      .setName("edit")
-      .setDescription("Edit the wood stock embed"),
+    new SlashCommandBuilder().setName("send").setDescription("Send stock embed"),
+    new SlashCommandBuilder().setName("edit").setDescription("Edit stock embed"),
   ];
 
   await client.application.commands.set(commands);
@@ -45,20 +82,14 @@ client.once(Events.ClientReady, async () => {
 // ───────── INTERACTIONS ─────────
 client.on(Events.InteractionCreate, async (interaction) => {
 
-  // ───── ROLE + CHANNEL CHECK ─────
+  // ───── PERMS ─────
   if (interaction.isChatInputCommand()) {
     if (["send", "edit"].includes(interaction.commandName)) {
       if (interaction.channelId !== COMMAND_CHANNEL_ID) {
-        return interaction.reply({
-          content: "❌ Use this command in the stock channel only.",
-          ephemeral: true,
-        });
+        return interaction.reply({ content: "Wrong channel.", ephemeral: true });
       }
       if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
-        return interaction.reply({
-          content: "❌ You do not have permission to use this command.",
-          ephemeral: true,
-        });
+        return interaction.reply({ content: "No permission.", ephemeral: true });
       }
     }
   }
@@ -81,10 +112,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 **Most Expensive:** None
 **Most Popular:** None
-**Most In Stock:** None
-
-Want pings when we **restock**?
-https://discord.com/channels/1467957243017302189/1467958086479118590`;
+**Most In Stock:** None`;
 
     const embed1 = new EmbedBuilder()
       .setTitle("Wood Stock <:oak:1467561136567357587>")
@@ -94,11 +122,6 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
     const embed2 = new EmbedBuilder()
       .setTitle("Prices :money_with_wings:")
       .setDescription("**Wood Stock Prices**\nPrices will be added soon!")
-      .setFooter({
-        text: "Cheap Services Wood Stock",
-        iconURL:
-          "https://i.postimg.cc/gcKB5Kqk/2910e290-9916-40a4-a26d-c593f12a28d1-md-removebg-preview.png",
-      })
       .setColor("#d3bf7e");
 
     const row = new ActionRowBuilder().addComponents(
@@ -115,17 +138,76 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
 
     EDIT_MESSAGE_ID = msg.id;
 
-    await interaction.reply({
-      content: "✅ Stock embed sent",
-      ephemeral: true,
-    });
+    return interaction.reply({ content: "Sent.", ephemeral: true });
   }
 
-  // ───────── BUY HERE BUTTON (FIXED) ─────────
+  // ───────── /edit (PREFILLS FROM MESSAGE) ─────────
+  if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
+
+    let msg = null;
+
+    if (EDIT_MESSAGE_ID) {
+      msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID).catch(() => null);
+    }
+
+    if (!msg) {
+      msg = await findStockMessage(interaction.channel);
+    }
+
+    if (!msg) {
+      return interaction.reply({
+        content: "No stock message found.",
+        ephemeral: true,
+      });
+    }
+
+    EDIT_MESSAGE_ID = msg.id;
+
+    const modal = new ModalBuilder()
+      .setCustomId("edit_modal")
+      .setTitle("Edit Stock Embeds");
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("stock_desc")
+          .setLabel("Stock Embed Description")
+          .setStyle(TextInputStyle.Paragraph)
+          .setValue(msg.embeds[0]?.description || "")
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("price_desc")
+          .setLabel("Prices Embed Description")
+          .setStyle(TextInputStyle.Paragraph)
+          .setValue(msg.embeds[1]?.description || "")
+      )
+    );
+
+    return interaction.showModal(modal);
+  }
+
+  // ───────── EDIT SUBMIT ─────────
+  if (interaction.isModalSubmit() && interaction.customId === "edit_modal") {
+    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
+
+    const e1 = EmbedBuilder.from(msg.embeds[0]).setDescription(
+      interaction.fields.getTextInputValue("stock_desc")
+    );
+    const e2 = EmbedBuilder.from(msg.embeds[1]).setDescription(
+      interaction.fields.getTextInputValue("price_desc")
+    );
+
+    await msg.edit({ embeds: [e1, e2] });
+
+    return interaction.reply({ content: "Updated.", ephemeral: true });
+  }
+
+  // ───────── BUY HERE ─────────
   if (interaction.isButton() && interaction.customId === "buy_here") {
     const modal = new ModalBuilder()
       .setCustomId("buy_modal")
-      .setTitle("Wood Order Form");
+      .setTitle("Wood Order");
 
     modal.addComponents(
       new ActionRowBuilder().addComponents(
@@ -154,7 +236,7 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
     return interaction.showModal(modal);
   }
 
-  // ───────── BUY MODAL SUBMIT → CREATE TICKET ─────────
+  // ───────── CREATE TICKET ─────────
   if (interaction.isModalSubmit() && interaction.customId === "buy_modal") {
     const wood = interaction.fields.getTextInputValue("wood");
     const amount = interaction.fields.getTextInputValue("amount");
@@ -166,16 +248,12 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
       parent: TICKET_CATEGORY_ID,
       permissionOverwrites: [
         { id: interaction.guild.id, deny: ["ViewChannel"] },
-        {
-          id: interaction.user.id,
-          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
-        },
-        {
-          id: STAFF_ROLE_ID,
-          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
-        },
+        { id: interaction.user.id, allow: ["ViewChannel", "SendMessages"] },
+        { id: STAFF_ROLE_ID, allow: ["ViewChannel", "SendMessages"] },
       ],
     });
+
+    await channel.setTopic(`owner:${interaction.user.id}`);
 
     await channel.send({
       content: `<@&${STAFF_ROLE_ID}>`,
@@ -186,69 +264,54 @@ https://discord.com/channels/1467957243017302189/1467958086479118590`;
           .addFields(
             { name: "Discord User", value: interaction.user.toString() },
             { name: "Username", value: username },
-            { name: "Wood Type", value: wood, inline: true },
+            { name: "Wood", value: wood, inline: true },
             { name: "Amount", value: amount, inline: true }
           ),
       ],
+      components: [ticketControls("open")],
     });
 
     return interaction.reply({
-      content: `✅ Order created!\n👉 <#${channel.id}>`,
+      content: `Order created → <#${channel.id}>`,
       ephemeral: true,
     });
   }
 
-  // ───────── /edit ─────────
-  if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
-    if (!EDIT_MESSAGE_ID) {
-      return interaction.reply({
-        content: "❌ No stock message found.",
-        ephemeral: true,
+  // ───────── CLOSE / OPEN / DELETE ─────────
+  if (interaction.isButton() && interaction.customId === "close_ticket") {
+    const owner = interaction.channel.topic?.split("owner:")[1];
+    if (owner) {
+      await interaction.channel.permissionOverwrites.edit(owner, {
+        ViewChannel: false,
       });
     }
-
-    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
-
-    const modal = new ModalBuilder()
-      .setCustomId("edit_modal")
-      .setTitle("Edit Stock Embeds");
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("stock_desc")
-          .setLabel("Stock Embed Description")
-          .setStyle(TextInputStyle.Paragraph)
-          .setValue(msg.embeds[0]?.description || "")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("price_desc")
-          .setLabel("Prices Embed Description")
-          .setStyle(TextInputStyle.Paragraph)
-          .setValue(msg.embeds[1]?.description || "")
-      )
-    );
-
-    return interaction.showModal(modal);
+    await interaction.channel.setParent(CLOSED_CATEGORY_ID);
+    await interaction.channel.send({
+      content: "Ticket closed.",
+      components: [ticketControls("closed")],
+    });
+    return interaction.reply({ content: "Closed.", ephemeral: true });
   }
 
-  if (interaction.isModalSubmit() && interaction.customId === "edit_modal") {
-    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
-
-    const e1 = EmbedBuilder.from(msg.embeds[0]).setDescription(
-      interaction.fields.getTextInputValue("stock_desc")
-    );
-    const e2 = EmbedBuilder.from(msg.embeds[1]).setDescription(
-      interaction.fields.getTextInputValue("price_desc")
-    );
-
-    await msg.edit({ embeds: [e1, e2] });
-
-    return interaction.reply({
-      content: "✅ Embeds updated",
-      ephemeral: true,
+  if (interaction.isButton() && interaction.customId === "open_ticket") {
+    const owner = interaction.channel.topic?.split("owner:")[1];
+    if (owner) {
+      await interaction.channel.permissionOverwrites.edit(owner, {
+        ViewChannel: true,
+        SendMessages: true,
+      });
+    }
+    await interaction.channel.setParent(TICKET_CATEGORY_ID);
+    await interaction.channel.send({
+      content: "Ticket reopened.",
+      components: [ticketControls("open")],
     });
+    return interaction.reply({ content: "Reopened.", ephemeral: true });
+  }
+
+  if (interaction.isButton() && interaction.customId === "delete_ticket") {
+    await interaction.reply({ content: "Deleting…", ephemeral: true });
+    setTimeout(() => interaction.channel.delete(), 2000);
   }
 });
 
