@@ -22,50 +22,9 @@ const client = new Client({
 const ADMIN_ROLE_ID = "1468655631979253892";
 const COMMAND_CHANNEL_ID = "1467957330816667814";
 const TICKET_CATEGORY_ID = "1468656976761327698";
-const CLOSED_CATEGORY_ID = "1469050238432972901";
 const STAFF_ROLE_ID = "1468656996676010014";
 
 let EDIT_MESSAGE_ID = null;
-
-// ───────── HELPER: FIND STOCK MESSAGE ─────────
-async function findStockMessage(channel) {
-  const messages = await channel.messages.fetch({ limit: 50 });
-  return messages.find(
-    (m) =>
-      m.author.id === channel.client.user.id &&
-      m.embeds.length === 2 &&
-      m.components.length > 0
-  );
-}
-
-// ───────── TICKET BUTTONS ─────────
-function ticketControls(state = "open") {
-  const row = new ActionRowBuilder();
-
-  if (state === "open") {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Close Ticket")
-        .setStyle(ButtonStyle.Danger)
-    );
-  }
-
-  if (state === "closed") {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId("open_ticket")
-        .setLabel("Open Ticket")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId("delete_ticket")
-        .setLabel("Delete Ticket")
-        .setStyle(ButtonStyle.Secondary)
-    );
-  }
-
-  return row;
-}
 
 // ───────── READY ─────────
 client.once(Events.ClientReady, async () => {
@@ -95,7 +54,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           ephemeral: true,
         });
       }
-
       if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
         return interaction.reply({
           content: "❌ You do not have permission to use this command.",
@@ -107,16 +65,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // ───────── /send ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "send") {
-
-    const existing = await findStockMessage(interaction.channel);
-    if (existing) {
-      EDIT_MESSAGE_ID = existing.id;
-      return interaction.reply({
-        content: "❌ Stock message already exists. Use /edit.",
-        ephemeral: true,
-      });
-    }
-
     const stockDescription = `**Wood Service Stock**
 <:oak:1467561136567357587> *Oak Log* - **"0"** In Stock
 <:birch:1467561466751221802> *Birch Log* - **"0"** In Stock
@@ -129,7 +77,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 <:baddoo:1467962582752170231> *Bamboo Log* - **"0"** In Stock
 <:pale:1468342960692138047> *Pale Oak Log* - **"0"** In Stock
 <a:warped:1467565047193538622> *Warped Log* - **"0"** In Stock
-<a:crimson:1467565347166097558> *Crimson Log* - **"0"** In Stock`;
+<a:crimson:1467565347166097558> *Crimson Log* - **"0"** In Stock
+
+**Most Expensive:** None
+**Most Popular:** None
+**Most In Stock:** None
+
+Want pings when we **restock**?
+https://discord.com/channels/1467957243017302189/1467958086479118590`;
 
     const embed1 = new EmbedBuilder()
       .setTitle("Wood Stock <:oak:1467561136567357587>")
@@ -139,6 +94,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const embed2 = new EmbedBuilder()
       .setTitle("Prices :money_with_wings:")
       .setDescription("**Wood Stock Prices**\nPrices will be added soon!")
+      .setFooter({
+        text: "Cheap Services Wood Stock",
+        iconURL:
+          "https://i.postimg.cc/gcKB5Kqk/2910e290-9916-40a4-a26d-c593f12a28d1-md-removebg-preview.png",
+      })
       .setColor("#d3bf7e");
 
     const row = new ActionRowBuilder().addComponents(
@@ -161,27 +121,93 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   }
 
+  // ───────── BUY HERE BUTTON (FIXED) ─────────
+  if (interaction.isButton() && interaction.customId === "buy_here") {
+    const modal = new ModalBuilder()
+      .setCustomId("buy_modal")
+      .setTitle("Wood Order Form");
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("wood")
+          .setLabel("What type of wood?")
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Amount?")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("username")
+          .setLabel("In-game username")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+      )
+    );
+
+    return interaction.showModal(modal);
+  }
+
+  // ───────── BUY MODAL SUBMIT → CREATE TICKET ─────────
+  if (interaction.isModalSubmit() && interaction.customId === "buy_modal") {
+    const wood = interaction.fields.getTextInputValue("wood");
+    const amount = interaction.fields.getTextInputValue("amount");
+    const username = interaction.fields.getTextInputValue("username");
+
+    const channel = await interaction.guild.channels.create({
+      name: `order-${wood}-${amount}`.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+      type: ChannelType.GuildText,
+      parent: TICKET_CATEGORY_ID,
+      permissionOverwrites: [
+        { id: interaction.guild.id, deny: ["ViewChannel"] },
+        {
+          id: interaction.user.id,
+          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
+        },
+        {
+          id: STAFF_ROLE_ID,
+          allow: ["ViewChannel", "SendMessages", "ReadMessageHistory"],
+        },
+      ],
+    });
+
+    await channel.send({
+      content: `<@&${STAFF_ROLE_ID}>`,
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🪵 New Wood Order")
+          .setColor("#d3bf7e")
+          .addFields(
+            { name: "Discord User", value: interaction.user.toString() },
+            { name: "Username", value: username },
+            { name: "Wood Type", value: wood, inline: true },
+            { name: "Amount", value: amount, inline: true }
+          ),
+      ],
+    });
+
+    return interaction.reply({
+      content: `✅ Order created!\n👉 <#${channel.id}>`,
+      ephemeral: true,
+    });
+  }
+
   // ───────── /edit ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
-
-    let msg = null;
-
-    if (EDIT_MESSAGE_ID) {
-      msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID).catch(() => null);
-    }
-
-    if (!msg) {
-      msg = await findStockMessage(interaction.channel);
-    }
-
-    if (!msg) {
+    if (!EDIT_MESSAGE_ID) {
       return interaction.reply({
-        content: "❌ No stock message found. Use /send first.",
+        content: "❌ No stock message found.",
         ephemeral: true,
       });
     }
 
-    EDIT_MESSAGE_ID = msg.id;
+    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
 
     const modal = new ModalBuilder()
       .setCustomId("edit_modal")
@@ -204,24 +230,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       )
     );
 
-    await interaction.showModal(modal);
+    return interaction.showModal(modal);
   }
 
-  // ───────── EDIT SUBMIT ─────────
   if (interaction.isModalSubmit() && interaction.customId === "edit_modal") {
     const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
 
     const e1 = EmbedBuilder.from(msg.embeds[0]).setDescription(
       interaction.fields.getTextInputValue("stock_desc")
     );
-
     const e2 = EmbedBuilder.from(msg.embeds[1]).setDescription(
       interaction.fields.getTextInputValue("price_desc")
     );
 
     await msg.edit({ embeds: [e1, e2] });
 
-    await interaction.reply({
+    return interaction.reply({
       content: "✅ Embeds updated",
       ephemeral: true,
     });
