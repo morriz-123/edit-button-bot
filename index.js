@@ -11,7 +11,6 @@ const {
   EmbedBuilder,
   SlashCommandBuilder,
   Events,
-  PermissionFlagsBits,
   ChannelType,
 } = require("discord.js");
 
@@ -20,13 +19,24 @@ const client = new Client({
 });
 
 // CONFIG
-const ADMIN_ROLE_ID = "1468655631979253892"; // ✅ ADDED
-const COMMAND_CHANNEL_ID = "1467957330816667814"; // ✅ ADDED
+const ADMIN_ROLE_ID = "1468655631979253892";
+const COMMAND_CHANNEL_ID = "1467957330816667814";
 const TICKET_CATEGORY_ID = "1468656976761327698";
 const CLOSED_CATEGORY_ID = "1469050238432972901";
 const STAFF_ROLE_ID = "1468656996676010014";
 
 let EDIT_MESSAGE_ID = null;
+
+// ───────── HELPER: FIND STOCK MESSAGE ─────────
+async function findStockMessage(channel) {
+  const messages = await channel.messages.fetch({ limit: 50 });
+  return messages.find(
+    (m) =>
+      m.author.id === channel.client.user.id &&
+      m.embeds.length === 2 &&
+      m.components.length > 0
+  );
+}
 
 // ───────── TICKET BUTTONS ─────────
 function ticketControls(state = "open") {
@@ -65,7 +75,6 @@ client.once(Events.ClientReady, async () => {
     new SlashCommandBuilder()
       .setName("send")
       .setDescription("Send wood stock embed"),
-
     new SlashCommandBuilder()
       .setName("edit")
       .setDescription("Edit the wood stock embed"),
@@ -77,10 +86,9 @@ client.once(Events.ClientReady, async () => {
 // ───────── INTERACTIONS ─────────
 client.on(Events.InteractionCreate, async (interaction) => {
 
-  // ───── PERM + CHANNEL CHECK (ONLY FOR /send & /edit) ─────
+  // ───── ROLE + CHANNEL CHECK FOR /send & /edit ─────
   if (interaction.isChatInputCommand()) {
     if (["send", "edit"].includes(interaction.commandName)) {
-
       if (interaction.channelId !== COMMAND_CHANNEL_ID) {
         return interaction.reply({
           content: "❌ Use this command in the stock channel only.",
@@ -97,8 +105,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
-  // /send
+  // ───────── /send ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "send") {
+
+    const existing = await findStockMessage(interaction.channel);
+    if (existing) {
+      EDIT_MESSAGE_ID = existing.id;
+      return interaction.reply({
+        content: "❌ Stock message already exists. Use /edit.",
+        ephemeral: true,
+      });
+    }
+
     const stockDescription = `**Wood Service Stock**
 <:oak:1467561136567357587> *Oak Log* - **"0"** In Stock
 <:birch:1467561466751221802> *Birch Log* - **"0"** In Stock
@@ -121,19 +139,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const embed2 = new EmbedBuilder()
       .setTitle("Prices :money_with_wings:")
       .setDescription("**Wood Stock Prices**\nPrices will be added soon!")
-      .setFooter({
-        text: "Cheap Services Wood Stock",
-        iconURL:
-          "https://i.postimg.cc/gcKB5Kqk/2910e290-9916-40a4-a26d-c593f12a28d1-md-removebg-preview.png",
-      })
       .setColor("#d3bf7e");
 
-    const buyButton = new ButtonBuilder()
-      .setCustomId("buy_here")
-      .setLabel("Buy Here")
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(buyButton);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("buy_here")
+        .setLabel("Buy Here")
+        .setStyle(ButtonStyle.Success)
+    );
 
     const msg = await interaction.channel.send({
       embeds: [embed1, embed2],
@@ -142,57 +155,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     EDIT_MESSAGE_ID = msg.id;
 
-    await interaction.reply({ content: "✅ Stock embed sent", ephemeral: true });
+    await interaction.reply({
+      content: "✅ Stock embed sent",
+      ephemeral: true,
+    });
   }
 
-  // BUY BUTTON
-  if (interaction.isButton() && interaction.customId === "buy_here") {
-    const modal = new ModalBuilder()
-      .setCustomId("buy_modal")
-      .setTitle("Wood Order Form");
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("wood")
-          .setLabel("What type of wood?")
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setPlaceholder(
-            "Oak, Pale, Crimson, Warped, Jungle, Mangrove,\nCherry, Birch, Dark Oak, Spruce, Bamboo, Acacia"
-          )
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("amount")
-          .setLabel("Amount?")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder("1–∞")
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("username")
-          .setLabel("Username?")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder("In-game username")
-      )
-    );
-
-    await interaction.showModal(modal);
-  }
-
-  // /edit (THIS ALREADY STORES LAST EDIT — DO NOT CHANGE)
+  // ───────── /edit ─────────
   if (interaction.isChatInputCommand() && interaction.commandName === "edit") {
-    if (!EDIT_MESSAGE_ID) {
+
+    let msg = null;
+
+    if (EDIT_MESSAGE_ID) {
+      msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID).catch(() => null);
+    }
+
+    if (!msg) {
+      msg = await findStockMessage(interaction.channel);
+    }
+
+    if (!msg) {
       return interaction.reply({
-        content: "❌ No stock message found.",
+        content: "❌ No stock message found. Use /send first.",
         ephemeral: true,
       });
     }
 
-    const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
+    EDIT_MESSAGE_ID = msg.id;
 
     const modal = new ModalBuilder()
       .setCustomId("edit_modal")
@@ -218,6 +207,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.showModal(modal);
   }
 
+  // ───────── EDIT SUBMIT ─────────
   if (interaction.isModalSubmit() && interaction.customId === "edit_modal") {
     const msg = await interaction.channel.messages.fetch(EDIT_MESSAGE_ID);
 
