@@ -86,7 +86,7 @@ client.once(Events.ClientReady, async () => {
 // ───────── INTERACTIONS ─────────
 client.on(Events.InteractionCreate, async (interaction) => {
 
-  // ───── ROLE + CHANNEL CHECK FOR /send & /edit ─────
+  // ───── ROLE + CHANNEL CHECK ─────
   if (interaction.isChatInputCommand()) {
     if (["send", "edit"].includes(interaction.commandName)) {
       if (interaction.channelId !== COMMAND_CHANNEL_ID) {
@@ -214,6 +214,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const e1 = EmbedBuilder.from(msg.embeds[0]).setDescription(
       interaction.fields.getTextInputValue("stock_desc")
     );
+
     const e2 = EmbedBuilder.from(msg.embeds[1]).setDescription(
       interaction.fields.getTextInputValue("price_desc")
     );
